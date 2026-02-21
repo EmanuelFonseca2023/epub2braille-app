@@ -80,3 +80,4 @@ Unused cells at the end of a line are padded with `0x00`.
 ## License
 
 MIT © Emanuel Fonseca
+

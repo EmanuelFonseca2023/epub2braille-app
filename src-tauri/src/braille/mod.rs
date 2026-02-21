@@ -1,6 +1,5 @@
 use std::fs::{self, File};
 use std::io::Read;
-use std::env;
 use zip::ZipArchive;
 use scraper::{Html, Selector};
 
@@ -686,13 +685,7 @@ fn extraer_texto_xhtml(content: &str, selector: &Selector) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
-
-// ─── Main ────────────────────────────────────────────────────────────────────
-
 pub fn convertir_epub_a_bin(epub_path: &str) -> Result<String, String> {
-    use std::fs::{self, File};
-    use std::io::Read;
-    use zip::ZipArchive;
     use scraper::Selector;
 
     let bin_path = format!("{}_braille.bin",
@@ -725,4 +718,39 @@ pub fn convertir_epub_a_bin(epub_path: &str) -> Result<String, String> {
         .map_err(|e| format!("No se pudo escribir: {}", e))?;
 
     Ok(bin_path)
+}
+// ─── API pública para el editor ──────────────────────────────────────────────
+
+pub fn extraer_texto_epub(epub_path: &str) -> Result<String, String> {
+    use scraper::Selector;
+
+    let file = File::open(epub_path)
+        .map_err(|e| format!("No se pudo abrir: {}", e))?;
+    let mut archive = ZipArchive::new(file)
+        .map_err(|e| format!("No es un EPUB válido: {}", e))?;
+
+    let opf_path = leer_opf_path(&mut archive);
+    let archivos = leer_spine(&mut archive, &opf_path);
+    let selector = Selector::parse("p").unwrap();
+
+    let texto = archivos.iter()
+        .filter_map(|path| {
+            let path_limpio = path.split('#').next().unwrap_or(path);
+            archive.by_name(path_limpio).ok().map(|mut entry| {
+                let mut content = String::new();
+                entry.read_to_string(&mut content).unwrap();
+                extraer_texto_xhtml(&content, &selector) + "\n\n"
+            })
+        })
+        .collect::<String>();
+
+    Ok(texto)
+}
+
+pub fn convertir_texto_a_bin(texto: &str, bin_path: &str) -> Result<String, String> {
+    let celdas = codificar_texto(texto);
+    let bytes = formatear_lineas(&celdas);
+    fs::write(bin_path, &bytes)
+        .map_err(|e| format!("No se pudo escribir: {}", e))?;
+    Ok(bin_path.to_string())
 }

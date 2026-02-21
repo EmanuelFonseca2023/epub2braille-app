@@ -1,11 +1,13 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { open } from "@tauri-apps/plugin-dialog";
+  import { goto } from "$app/navigation";
+  import Resumen from "$lib/Resumen.svelte";
 
   type Estado =
     | { tipo: "idle" }
     | { tipo: "cargando" }
-    | { tipo: "ok"; ruta: string }
+    | { tipo: "ok"; ruta: string; epubPath: string; bytes: number }
     | { tipo: "error"; mensaje: string };
 
   let estado: Estado = { tipo: "idle" };
@@ -15,28 +17,38 @@
     estado = { tipo: "cargando" };
     try {
       const salida = await invoke<string>("convertir", { path });
-      estado = { tipo: "ok", ruta: salida };
+      const bytes = await invoke<number>("obtener_tamano", { path: salida });
+      estado = { tipo: "ok", ruta: salida, epubPath: path, bytes };
     } catch (e) {
       estado = { tipo: "error", mensaje: String(e) };
     }
   }
 
-  async function abrirDialogo() {
+  async function abrirEditor(path: string) {
+    estado = { tipo: "cargando" };
+    try {
+      const texto = await invoke<string>("extraer_texto", { path });
+      sessionStorage.setItem("editor_texto", texto);
+      sessionStorage.setItem("editor_bin_path", path.replace(".epub", "_braille.bin"));
+      goto("/editor");
+    } catch (e) {
+      estado = { tipo: "error", mensaje: String(e) };
+    }
+  }
+
+  async function abrirDialogo(modo: "convertir" | "editar") {
     const seleccionado = await open({
       multiple: false,
       filters: [{ name: "EPUB", extensions: ["epub"] }],
     });
-    if (seleccionado) convertir(seleccionado as string);
+    if (!seleccionado) return;
+    const path = seleccionado as string;
+    if (modo === "editar") abrirEditor(path);
+    else convertir(path);
   }
 
-  function onDragOver(e: DragEvent) {
-    e.preventDefault();
-    arrastrando = true;
-  }
-
-  function onDragLeave() {
-    arrastrando = false;
-  }
+  function onDragOver(e: DragEvent) { e.preventDefault(); arrastrando = true; }
+  function onDragLeave() { arrastrando = false; }
 
   function onDrop(e: DragEvent) {
     e.preventDefault();
@@ -60,7 +72,7 @@
 
   <button
     class="zona {arrastrando ? 'sobre' : ''} {estado.tipo}"
-    on:click={abrirDialogo}
+    on:click={() => abrirDialogo("convertir")}
     on:dragover={onDragOver}
     on:dragleave={onDragLeave}
     on:drop={onDrop}
@@ -68,7 +80,7 @@
   >
     {#if estado.tipo === "cargando"}
       <div class="spinner"></div>
-      <span>Convirtiendo...</span>
+      <span>Procesando...</span>
     {:else if estado.tipo === "ok"}
       <span class="icono">✓</span>
       <span>¡Conversión exitosa!</span>
@@ -80,7 +92,7 @@
     {:else}
       <span class="icono">↑</span>
       <span>Arrastra tu <code>.epub</code> aquí</span>
-      <small>o haz clic para elegir</small>
+      <small>o haz clic para convertir directo</small>
     {/if}
   </button>
 
@@ -89,12 +101,22 @@
       <span class="label">Archivo guardado en:</span>
       <span class="ruta">{estado.ruta}</span>
     </div>
+    <Resumen bytes={estado.bytes} />
+    <button class="btn-secundario" on:click={() => estado.tipo === "ok" && abrirEditor(estado.epubPath)}>
+      Editar este archivo
+    </button>
   {/if}
 
   {#if estado.tipo === "error"}
     <div class="resultado error">
       {estado.mensaje}
     </div>
+  {/if}
+
+  {#if estado.tipo === "idle" || estado.tipo === "error"}
+    <button class="btn-secundario" on:click={() => abrirDialogo("editar")}>
+      Editar antes de convertir
+    </button>
   {/if}
 </main>
 
@@ -162,4 +184,16 @@
   .resultado.error { border: 1px solid #5a2d2d; color: #eb5757; }
   .label { display: block; color: #555; margin-bottom: 0.3rem; }
   .ruta { color: #6fcf97; font-family: monospace; word-break: break-all; }
+
+  .btn-secundario {
+    background: none;
+    border: 1px solid #2a2a35;
+    border-radius: 10px;
+    color: #555;
+    font-size: 0.82rem;
+    padding: 0.45rem 1.1rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-secundario:hover { border-color: #7c6af7; color: #a78bfa; }
 </style>
